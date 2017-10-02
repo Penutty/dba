@@ -27,13 +27,6 @@ func OpenConn() (c *Conn) {
 	return
 }
 
-func (c *Conn) Close() {
-	c.Db.Close()
-	if r := recover(); r != nil {
-		fmt.Printf("Recovering.\n")
-	}
-}
-
 type Trans struct {
 	Tx *sql.Tx
 }
@@ -52,29 +45,14 @@ func OpenTx() (t *Trans) {
 	return
 }
 
-func ValidateTx(t *Trans) (f func()) {
-	if t == nil {
-		f = func() {
-			c := OpenTx()
-			defer c.Close()
-		}
+func (t *Trans) Close(err error) {
+	fmt.Printf("err: %v\n", err)
+	if err != nil {
+		t.Tx.Rollback()
+		return
 	}
-	return f
-}
+	t.Tx.Commit()
 
-func (t *Trans) Close() func(err error) {
-	return func(err error) {
-		if r := recover(); r != nil {
-			fmt.Printf("Recovering.\n")
-			return
-		}
-
-		if err != nil {
-			t.Tx.Rollback()
-			return
-		}
-		t.Tx.Commit()
-	}
 }
 
 var ErrorExpectedNotActual = errors.New("db.Exec affected an unpredicted number of rows.")
