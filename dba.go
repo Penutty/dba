@@ -46,7 +46,6 @@ func OpenTx() (t *Trans) {
 }
 
 func (t *Trans) Close(err error) {
-	fmt.Printf("err: %v\n", err)
 	if err != nil {
 		t.Tx.Rollback()
 		return
