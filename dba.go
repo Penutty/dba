@@ -71,8 +71,19 @@ func ValidateRowsAffected(res sql.Result, expected int) (err error) {
 	return
 }
 
+const (
+	Name   = 0
+	Alias  = 1
+	Schema = 2
+	Prefix = 2
+
+	Operator = iota
+	Clause
+	Args
+)
+
 var (
-	ErrorEmptyStrings          = errors.New("Empty strings passed into Query.Select().")
+	ErrorEmptyString           = errors.New("Empty string passed into function().")
 	ErrorSelectClauseEmpty     = errors.New("Query.selectClause is empty.")
 	ErrorFromClauseEmpty       = errors.New("Query.fromClause is empty.")
 	ErrorArgsParametersEmpty   = errors.New("No arguments passed into Query.Args().")
@@ -80,14 +91,30 @@ var (
 	ErrorColumnDestCntNotEqual = errors.New("Column count does not equal destination count.")
 )
 
+type column struct {
+	prefix string
+	name   string
+	alias  string
+	dest   interface{}
+}
+
+type table struct {
+	schema string
+	name   string
+	alias  string
+}
+
+type where struct {
+	logicalOp string
+	clause    string
+	args      []interface{}
+}
+
 type Query struct {
-	comment      string
-	selectClause []string
-	fromClause   string
-	joinClause   []string
-	whereClause  []string
-	args         []interface{}
-	destinations []*dest
+	comment string
+	columns []*column
+	froms   []*table
+	wheres  []*where
 }
 
 func NewQuery(comment string) (q *Query) {
@@ -97,91 +124,107 @@ func NewQuery(comment string) (q *Query) {
 	}
 }
 
-func (q *Query) Selects(columns ...string) (err error) {
-	if len(columns) <= 0 {
+func (q *Query) SetColumns(s ...[]string) (err error) {
+	if len(s) <= 0 {
+		return ErrorEmptySlice
+	}
+
+	for _, c := range s {
+		col, err := newColumn(c[Prefix], c[Name], c[Alias])
+		if err != nil {
+			return
+		}
+		q.columns = append(q.columns, col)
+	}
+	return
+}
+
+func newColumn(name string, alias string) (c *column, err error) {
+	if util.IsEmpty(name) || util.IsEmpty(prefix) {
 		return ErrorEmptyString
 	}
-
-	q.selectClause = append(q.selectClause, columns...)
+	var i interface{}
+	c = &column{
+		prefix: prefix,
+		name:   name,
+		alias:  alias,
+		dest:   i,
+	}
 	return
 }
 
-func (q *Query) From(clause string) (err error) {
-	if clause == "" {
-		return ErrorEmptyString
+func (q *Query) SetFroms(s ...[]string) (err error) {
+	if len(s) <= 0 {
+		return ErrorEmptySlice
 	}
 
-	q.fromClause = clause
+	for _, f := range s {
+		t, err := newTable(f[Schema], f[Name], f[Alias])
+		q.froms = append(q.froms, t)
+	}
 	return
 }
 
-func (q *Query) Join(clauses ...string) (err error) {
-	if len(clauses) <= 0 {
-		return ErrorEmptyString
+func newTable(schema string, name string, alias string) (t *table, err error) {
+	if util.IsEmpty(schema, name, alias) {
+		return
 	}
-
-	q.joinClause = append(q.joinClause, clauses...)
+	t = &table{
+		schema: schema,
+		name:   name,
+		alias:  alias,
+	}
 	return
 }
 
-func (q *Query) Where(clauses ...string) (err error) {
-	if len(clauses) <= 0 {
-		return ErrorEmptyString
+func (q *Query) SetWheres(s ...[]string) (err error) {
+	if util.IsEmpty(s[Clause]) {
+		return ErrorEmptySlice
 	}
 
-	q.whereClause = append(q.whereClause, clauses...)
+	for _, v := range s {
+		w, err := newWhere(v[Operator], v[Clause], v[Args])
+		if err != nil {
+			return
+		}
+		q.whereClause = append(q.whereClause, w)
+	}
 	return
 }
 
-func (q *Query) SetArgs(args ...interface{}) (err error) {
-	if len(args) <= 0 {
-		return ErrorArgsParametersEmpty
+func newWhere(operator string, clause string, args []interface{}) (w *where, err error) {
+	if util.IsEmpty(clause) {
+		return
 	}
-	q.args = args
+	w = &where{
+		logicalOp: logicalOp,
+		clause:    clause,
+		args:      args,
+	}
 	return
-}
-
-func (q *Query) Args() []interface{} {
-	return q.args
-}
-
-func (q *Query) SetDest(i interface{}, func()
-func (q *Query) Dest() []interface{} {
-	if util.IsEmpty(q.destinations) {
-		return ErrorDestinationsEmpty
-	}
-
-	dests := make([]interface{}, len(q.destinations))
-	for i, d := range q.destinations {
-		dests[i] = d.variable
-	}
-	return dests
-}
-
-type dest struct {
-	variable interface{}
-	handler  func()
 }
 
 func (q *Query) Build() (queryString string, err error) {
 	switch {
 	case len(q.selectClause) <= 0:
-		return ErrorSelectClauseEmpty
-	case q.fromClause == "":
-		return ErrorFromClauseEmpty
+		return queryString, ErrorSelectClauseEmpty
+	case len(q.fromClause) <= 0:
+		return queryString, ErrorFromClauseEmpty
 	case q.argsParamsCntNotEqual():
-		return ErrorArgsParamsCntNotEqual
-	case q.columnDestCntNotEqual():
-		return ErrorColumnDestCntNotEqual
+		return queryString, ErrorArgsParamsCntNotEqual
 	}
 
 	queryString = q.comment + `
-				  SELECT ` + strings.Join(q.selectClause, ", ") + `
-				  FROM ` + q.fromClause
+				  SELECT ` + strings.Join(q.selectClause, ", ") + "\n"
 
-	if len(q.joinClause) > 0 {
-		queryString = queryString + "\nJOIN " + strings.Join(q.joinClause, "\nJOIN ")
+	for i, c := range q.fromClause {
+		if i == 0 {
+			queryString += `FROM ` + c + "\n"
+		} else {
+			queryString += `JOIN ` + c + "\n"
+		}
 	}
+
 	if len(q.whereClause) > 0 {
 		queryString = queryString + "\nWHERE " + strings.Join(q.whereClause, "\n")
 	}
@@ -190,13 +233,6 @@ func (q *Query) Build() (queryString string, err error) {
 
 func (q *Query) argsParamsCntNotEqual() bool {
 	if strings.Count(strings.Join(q.whereClause, " "), "?") != len(q.args) {
-		return true
-	}
-	return false
-}
-
-func (q *Query) columnDestCntNotEqual() bool {
-	if len(q.selectClause) != len(q.dest) {
 		return true
 	}
 	return false
