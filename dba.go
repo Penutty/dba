@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	_ "github.com/minus5/gofreetds"
+	"github.com/penutty/util"
 	"strings"
 )
 
@@ -83,38 +84,54 @@ const (
 )
 
 var (
+	ErrorEmptySlice            = errors.New("Empty slice passed into function().")
 	ErrorEmptyString           = errors.New("Empty string passed into function().")
-	ErrorSelectClauseEmpty     = errors.New("Query.selectClause is empty.")
-	ErrorFromClauseEmpty       = errors.New("Query.fromClause is empty.")
+	ErrorSelectsEmpty          = errors.New("Query.selects is empty.")
+	ErrorFromsEmpty            = errors.New("Query.froms is empty.")
 	ErrorArgsParametersEmpty   = errors.New("No arguments passed into Query.Args().")
 	ErrorArgsParamsCntNotEqual = errors.New("Argument count does not equal parameter count.")
-	ErrorColumnDestCntNotEqual = errors.New("Column count does not equal destination count.")
 )
 
-type column struct {
+type Column struct {
 	prefix string
 	name   string
 	alias  string
-	dest   interface{}
 }
 
-type table struct {
+func (c Column) String() string {
+	return c.prefix + "." + c.name + " AS " + c.alias
+}
+
+type Table struct {
 	schema string
 	name   string
 	alias  string
+	join   string
 }
 
-type where struct {
-	logicalOp string
-	clause    string
-	args      []interface{}
+func (t Table) String() (s string) {
+	s = t.schema + "." + t.name + " " + t.alias + "\n"
+	if t.join != "" {
+		s += "ON " + t.join + "\n"
+	}
+	return
+}
+
+type Where struct {
+	operator string
+	clause   string
+	args     []interface{}
+}
+
+func (w Where) String() string {
+	return w.operator + " " + w.clause
 }
 
 type Query struct {
 	comment string
-	columns []*column
-	froms   []*table
-	wheres  []*where
+	columns []*Column
+	froms   []*Table
+	wheres  []*Where
 }
 
 func NewQuery(comment string) (q *Query) {
@@ -124,116 +141,116 @@ func NewQuery(comment string) (q *Query) {
 	}
 }
 
-func (q *Query) SetColumns(s ...[]string) (err error) {
-	if len(s) <= 0 {
+func (q *Query) SetColumns(columns ...*Column) (err error) {
+	if len(columns) <= 0 {
 		return ErrorEmptySlice
 	}
 
-	for _, c := range s {
-		col, err := newColumn(c[Prefix], c[Name], c[Alias])
-		if err != nil {
-			return
-		}
+	for _, col := range columns {
 		q.columns = append(q.columns, col)
 	}
 	return
 }
 
-func newColumn(name string, alias string) (c *column, err error) {
+func NewColumn(prefix string, name string, alias string) (c *Column, err error) {
 	if util.IsEmpty(name) || util.IsEmpty(prefix) {
-		return ErrorEmptyString
+		return c, ErrorEmptyString
 	}
-	var i interface{}
-	c = &column{
+	c = &Column{
 		prefix: prefix,
 		name:   name,
 		alias:  alias,
-		dest:   i,
 	}
 	return
 }
 
-func (q *Query) SetFroms(s ...[]string) (err error) {
-	if len(s) <= 0 {
+func (q *Query) SetFroms(tables ...*Table) (err error) {
+	if len(tables) <= 0 {
 		return ErrorEmptySlice
 	}
 
-	for _, f := range s {
-		t, err := newTable(f[Schema], f[Name], f[Alias])
+	for _, t := range tables {
 		q.froms = append(q.froms, t)
 	}
 	return
 }
 
-func newTable(schema string, name string, alias string) (t *table, err error) {
-	if util.IsEmpty(schema, name, alias) {
+func NewTable(schema string, name string, alias string, join string) (t *Table, err error) {
+	if util.IsEmpty(schema) || util.IsEmpty(name) || util.IsEmpty(alias) {
 		return
 	}
-	t = &table{
+	t = &Table{
 		schema: schema,
 		name:   name,
 		alias:  alias,
+		join:   join,
 	}
 	return
 }
 
-func (q *Query) SetWheres(s ...[]string) (err error) {
-	if util.IsEmpty(s[Clause]) {
+func (q *Query) SetWheres(wheres ...*Where) (err error) {
+	if util.IsEmpty(wheres) {
 		return ErrorEmptySlice
 	}
 
-	for _, v := range s {
-		w, err := newWhere(v[Operator], v[Clause], v[Args])
-		if err != nil {
-			return
-		}
-		q.whereClause = append(q.whereClause, w)
+	for _, w := range wheres {
+		q.wheres = append(q.wheres, w)
 	}
 	return
 }
 
-func newWhere(operator string, clause string, args []interface{}) (w *where, err error) {
+func NewWhere(operator string, clause string, args []interface{}) (w *Where, err error) {
 	if util.IsEmpty(clause) {
 		return
 	}
-	w = &where{
-		logicalOp: logicalOp,
-		clause:    clause,
-		args:      args,
+	w = &Where{
+		operator: operator,
+		clause:   clause,
+		args:     args,
 	}
 	return
 }
 
 func (q *Query) Build() (queryString string, err error) {
 	switch {
-	case len(q.selectClause) <= 0:
-		return queryString, ErrorSelectClauseEmpty
-	case len(q.fromClause) <= 0:
-		return queryString, ErrorFromClauseEmpty
-	case q.argsParamsCntNotEqual():
-		return queryString, ErrorArgsParamsCntNotEqual
+	case len(q.columns) <= 0:
+		return queryString, ErrorSelectsEmpty
+	case len(q.froms) <= 0:
+		return queryString, ErrorFromsEmpty
+	}
+
+	columnString := make([]string, 0)
+	for _, c := range q.columns {
+		columnString = append(columnString, c.String())
+	}
+
+	fromString := make([]string, 0)
+	for _, f := range q.froms {
+		fromString = append(fromString, f.String())
 	}
 
 	queryString = q.comment + `
-				  SELECT ` + strings.Join(q.selectClause, ", ") + "\n"
+				  SELECT ` + strings.Join(columnString, ", ") + `
+				  FROM ` + strings.Join(fromString, "\n")
 
-	for i, c := range q.fromClause {
-		if i == 0 {
-			queryString += `FROM ` + c + "\n"
-		} else {
-			queryString += `JOIN ` + c + "\n"
-		}
+	whereString := make([]string, 0)
+	for _, w := range q.wheres {
+		whereString = append(whereString, w.String())
 	}
 
-	if len(q.whereClause) > 0 {
-		queryString = queryString + "\nWHERE " + strings.Join(q.whereClause, "\n")
+	if len(whereString) > 0 {
+		queryString = queryString + "\nWHERE " + strings.Join(whereString, "\n")
 	}
 	return
 }
 
-func (q *Query) argsParamsCntNotEqual() bool {
-	if strings.Count(strings.Join(q.whereClause, " "), "?") != len(q.args) {
-		return true
+func (q *Query) Args() (as []interface{}, err error) {
+	if util.IsEmpty(q.wheres) {
+		return as, ErrorWheresEmpty
 	}
-	return false
+
+	for _, w := range q.wheres {
+		as = append(as, w.args...)
+	}
+	return
 }
