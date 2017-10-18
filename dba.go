@@ -7,10 +7,16 @@ import (
 	_ "github.com/minus5/gofreetds"
 	"github.com/penutty/util"
 	"strings"
+	"time"
 )
 
-var driver = "mssql"
-var momentConnStr = "Server=192.168.1.2:1433;Database=Moment-Db;User Id=Reader;Password=123"
+const (
+	driver        = "mssql"
+	momentConnStr = "Server=192.168.1.2:1433;Database=Moment-Db;User Id=Reader;Password=123"
+
+	// Datetime2 is the time.Time format this package uses to communicate DateTime2 values to Moment-Db.
+	Datetime2 = "2006-01-02 15:04:05"
+)
 
 type Conn struct {
 	Db *sql.DB
@@ -56,6 +62,15 @@ func (t *Trans) Close(err error) {
 
 }
 
+func ParseDateTime2(s string) (t *time.Time, err error) {
+	tp, err := time.Parse(Datetime2, s)
+	if err != nil {
+		return
+	}
+	t = &tp
+	return
+}
+
 var ErrorExpectedNotActual = errors.New("db.Exec affected an unpredicted number of rows.")
 
 func ValidateRowsAffected(res sql.Result, expected int) (err error) {
@@ -88,6 +103,7 @@ var (
 	ErrorEmptyString           = errors.New("Empty string passed into function().")
 	ErrorSelectsEmpty          = errors.New("Query.selects is empty.")
 	ErrorFromsEmpty            = errors.New("Query.froms is empty.")
+	ErrorWheresEmpty           = errors.New("Query.wheres is empty.")
 	ErrorArgsParametersEmpty   = errors.New("No arguments passed into Query.Args().")
 	ErrorArgsParamsCntNotEqual = errors.New("Argument count does not equal parameter count.")
 )
@@ -98,8 +114,12 @@ type Column struct {
 	alias  string
 }
 
-func (c Column) String() string {
-	return c.prefix + "." + c.name + " AS " + c.alias
+func (c Column) String() (s string) {
+	s = c.prefix + "." + c.name
+	if c.alias != "" {
+		s += " AS " + c.alias
+	}
+	return
 }
 
 type Table struct {
@@ -112,7 +132,7 @@ type Table struct {
 func (t Table) String() (s string) {
 	s = t.schema + "." + t.name + " " + t.alias + "\n"
 	if t.join != "" {
-		s += "ON " + t.join + "\n"
+		s = "JOIN " + s + "ON " + t.join
 	}
 	return
 }
