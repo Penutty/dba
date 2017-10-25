@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	driver        = "mssql"
-	momentConnStr = "Server=192.168.1.2:1433;Database=Moment-Db;User Id=Reader;Password=123"
+	driver = "mssql"
 
 	// Datetime2 is the time.Time format this package uses to communicate DateTime2 values to Moment-Db.
 	Datetime2 = "2006-01-02 15:04:05"
@@ -22,8 +21,8 @@ type Conn struct {
 	Db *sql.DB
 }
 
-func OpenConn() (c *Conn) {
-	db, err := sql.Open(driver, momentConnStr)
+func OpenConn(connstr string) (c *Conn) {
+	db, err := sql.Open(driver, connstr)
 	if err != nil {
 		fmt.Printf("Panicking.\n")
 		panic(err)
@@ -39,9 +38,9 @@ type Trans struct {
 	Tx *sql.Tx
 }
 
-func OpenTx() (t *Trans) {
+func OpenTx(connstr string) (t *Trans) {
 	var err error
-	c := OpenConn()
+	c := OpenConn(connstr)
 
 	t = new(Trans)
 	t.Tx, err = c.Db.Begin()
@@ -152,6 +151,11 @@ type Query struct {
 	columns []*Column
 	froms   []*Table
 	wheres  []*Where
+	err     error
+}
+
+func (q *Query) Err() error {
+	return q.err
 }
 
 func NewQuery(comment string) (q *Query) {
@@ -161,9 +165,13 @@ func NewQuery(comment string) (q *Query) {
 	}
 }
 
-func (q *Query) SetColumns(columns ...*Column) (err error) {
+func (q *Query) SetColumns(columns ...*Column) {
+	if q.err != nil {
+		return
+	}
 	if len(columns) <= 0 {
-		return ErrorEmptySlice
+		q.err = ErrorEmptySlice
+		return
 	}
 
 	for _, col := range columns {
@@ -172,9 +180,13 @@ func (q *Query) SetColumns(columns ...*Column) (err error) {
 	return
 }
 
-func NewColumn(prefix string, name string, alias string) (c *Column, err error) {
+func (q *Query) NewColumn(prefix string, name string, alias string) (c *Column) {
+	if q.err != nil {
+		return
+	}
 	if util.IsEmpty(name) || util.IsEmpty(prefix) {
-		return c, ErrorEmptyString
+		q.err = ErrorEmptyString
+		return
 	}
 	c = &Column{
 		prefix: prefix,
@@ -184,9 +196,13 @@ func NewColumn(prefix string, name string, alias string) (c *Column, err error) 
 	return
 }
 
-func (q *Query) SetFroms(tables ...*Table) (err error) {
+func (q *Query) SetFroms(tables ...*Table) {
+	if q.err != nil {
+		return
+	}
 	if len(tables) <= 0 {
-		return ErrorEmptySlice
+		q.err = ErrorEmptySlice
+		return
 	}
 
 	for _, t := range tables {
@@ -195,8 +211,12 @@ func (q *Query) SetFroms(tables ...*Table) (err error) {
 	return
 }
 
-func NewTable(schema string, name string, alias string, join string) (t *Table, err error) {
+func (q *Query) NewTable(schema string, name string, alias string, join string) (t *Table) {
+	if q.err != nil {
+		return
+	}
 	if util.IsEmpty(schema) || util.IsEmpty(name) || util.IsEmpty(alias) {
+		q.err = ErrorEmptyString
 		return
 	}
 	t = &Table{
@@ -208,9 +228,13 @@ func NewTable(schema string, name string, alias string, join string) (t *Table, 
 	return
 }
 
-func (q *Query) SetWheres(wheres ...*Where) (err error) {
+func (q *Query) SetWheres(wheres ...*Where) {
+	if q.err != nil {
+		return
+	}
 	if util.IsEmpty(wheres) {
-		return ErrorEmptySlice
+		q.err = ErrorEmptySlice
+		return
 	}
 
 	for _, w := range wheres {
@@ -219,8 +243,12 @@ func (q *Query) SetWheres(wheres ...*Where) (err error) {
 	return
 }
 
-func NewWhere(operator string, clause string, args []interface{}) (w *Where, err error) {
+func (q *Query) NewWhere(operator string, clause string, args []interface{}) (w *Where) {
+	if q.err != nil {
+		return
+	}
 	if util.IsEmpty(clause) {
+		q.err = ErrorEmptySlice
 		return
 	}
 	w = &Where{
